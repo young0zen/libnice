@@ -46,6 +46,12 @@
 
 #include <gio/gnetworking.h>
 
+//******user_add
+gchar *signaling_addr = NULL;
+guint signaling_port = 0;
+gchar *room = NULL; //房间号
+//**************
+
 static GMainLoop *gloop;
 static gchar *stun_addr = NULL;
 static guint stun_port;
@@ -59,8 +65,8 @@ static const gchar *candidate_type_name[] = {"host", "srflx", "prflx", "relay"};
 static const gchar *state_name[] = {"disconnected", "gathering", "connecting",
                                     "connected", "ready", "failed"};
 
-static int print_local_data(NiceAgent *agent, guint stream_id,
-    guint component_id);
+//static int print_local_data(NiceAgent *agent, guint stream_id,
+//    guint component_id);
 static int parse_remote_data(NiceAgent *agent, guint stream_id,
     guint component_id, char *line);
 static void cb_candidate_gathering_done(NiceAgent *agent, guint stream_id,
@@ -76,31 +82,71 @@ static void cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_id,
 
 static void * example_thread(void *data);
 
+//*************user_add*************
+static int
+communicate_signaling(NiceAgent *agent, guint _stream_id,guint component_id);
+static int
+communicate_signaling_passive(NiceAgent *agent, guint _stream_id,guint component_id);
+//**********************************
+
 int
 main(int argc, char *argv[])
 {
   GThread *gexamplethread;
 
+  nice_debug_enable(1);
+//******user_add
+
+    if (argc > 6 || argc < 5 || argv[1][1] != '\0') {
+        fprintf(stderr, "Usage: %s 0|1 stun_addr [stun_port] signaling_addr signaling port\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+    controlling = argv[1][0] - '0';
+    if (controlling != 0 && controlling != 1) {
+        fprintf(stderr, "Usage: %s 0|1 stun_addr [stun_port] signaling_addr signaling port\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    if (argc > 4) {
+        stun_addr = argv[2];
+        if (argc > 5) {
+            stun_port = atoi(argv[3]);
+            signaling_addr = argv[4];
+            signaling_port = atoi(argv[5]);
+        }
+        else
+        {
+            stun_port = 3478;
+            signaling_addr = argv[3];
+            signaling_port = atoi(argv[4]);
+        }
+
+
+        g_debug("Using stun server '[%s]:%u' Using signaling server '[%s]:%u'\n", stun_addr, stun_port, signaling_addr, signaling_port);
+    }
+
+
+    //**************
   // Parse arguments
-  if (argc > 4 || argc < 2 || argv[1][1] != '\0') {
-    fprintf(stderr, "Usage: %s 0|1 stun_addr [stun_port]\n", argv[0]);
-    return EXIT_FAILURE;
-  }
-  controlling = argv[1][0] - '0';
-  if (controlling != 0 && controlling != 1) {
-    fprintf(stderr, "Usage: %s 0|1 stun_addr [stun_port]\n", argv[0]);
-    return EXIT_FAILURE;
-  }
-
-  if (argc > 2) {
-    stun_addr = argv[2];
-    if (argc > 3)
-      stun_port = atoi(argv[3]);
-    else
-      stun_port = 3478;
-
-    g_debug("Using stun server '[%s]:%u'\n", stun_addr, stun_port);
-  }
+//  if (argc > 4 || argc < 2 || argv[1][1] != '\0') {
+//    fprintf(stderr, "Usage: %s 0|1 stun_addr [stun_port]\n", argv[0]);
+//    return EXIT_FAILURE;
+//  }
+//  controlling = argv[1][0] - '0';
+//  if (controlling != 0 && controlling != 1) {
+//    fprintf(stderr, "Usage: %s 0|1 stun_addr [stun_port]\n", argv[0]);
+//    return EXIT_FAILURE;
+//  }
+//
+//  if (argc > 2) {
+//    stun_addr = argv[2];
+//    if (argc > 3)
+//      stun_port = atoi(argv[3]);
+//    else
+//      stun_port = 3478;
+//
+//    g_debug("Using stun server '[%s]:%u'\n", stun_addr, stun_port);
+//  }
 
   g_networking_init();
 
@@ -125,8 +171,11 @@ example_thread(void *data)
   NiceCandidate *local, *remote;
   GIOChannel* io_stdin;
   guint stream_id;
+  GIOStatus s;
   gchar *line = NULL;
-  int rval;
+
+  GIOFlags flags;	  
+  //int rval;
 
 #ifdef G_OS_WIN32
   io_stdin = g_io_channel_win32_new_fd(_fileno(stdin));
@@ -135,6 +184,9 @@ example_thread(void *data)
 #endif
   g_io_channel_set_flags (io_stdin, G_IO_FLAG_NONBLOCK, NULL);
 
+
+  flags = g_io_channel_get_flags(io_stdin);
+  g_io_channel_set_flags(io_stdin, flags&~G_IO_FLAG_NONBLOCK,NULL);
   // Create the nice agent
   agent = nice_agent_new(g_main_loop_get_context (gloop),
       NICE_COMPATIBILITY_RFC5245);
@@ -157,7 +209,9 @@ example_thread(void *data)
       G_CALLBACK(cb_component_state_changed), NULL);
 
   // Create a new stream with one component
-  stream_id = nice_agent_add_stream(agent, 1);
+  stream_id = nice_agent_add_stream(agent,1);
+
+  nice_agent_set_relay_info(agent,stream_id,1,stun_addr,3478,"username","password",NICE_RELAY_TYPE_TURN_UDP);
   if (stream_id == 0)
     g_error("Failed to add stream");
 
@@ -180,34 +234,60 @@ example_thread(void *data)
     goto end;
 
   // Candidate gathering is done. Send our local candidates on stdout
-  printf("Copy this line to remote client:\n");
-  printf("\n  ");
-  print_local_data(agent, stream_id, 1);
-  printf("\n");
+//  printf("Copy this line to remote client:\n");
+//  printf("\n  ");
+//  print_local_data(agent, stream_id, 1);
+//  printf("\n");
+ 
+//*********user_add
+  if(controlling == 1){
+  printf("communicate with signaling\n");
+  communicate_signaling(agent,stream_id,1);
+  }
+  else
+  {
+      while(1) {
+          printf("Enter the room number:\n");
+          printf("> ");
+          fflush(stdout);
+	  s = g_io_channel_read_line(io_stdin, &line, NULL, NULL, NULL);
+          if (s == G_IO_STATUS_NORMAL) {
+              room = line;
+              if(room)
+              if(communicate_signaling_passive(agent, stream_id, 1))
+              break;
+          } else if(s == G_IO_STATUS_AGAIN){
+              g_usleep (100000);
+          }
+      }
+  }
+  //****************
+
 
   // Listen on stdin for the remote candidate list
-  printf("Enter remote data (single line, no wrapping):\n");
-  printf("> ");
-  fflush (stdout);
-  while (!exit_thread) {
-    GIOStatus s = g_io_channel_read_line (io_stdin, &line, NULL, NULL, NULL);
-    if (s == G_IO_STATUS_NORMAL) {
-      // Parse remote candidate list and set it on the agent
-      rval = parse_remote_data(agent, stream_id, 1, line);
-      if (rval == EXIT_SUCCESS) {
-        g_free (line);
-        break;
-      } else {
-        fprintf(stderr, "ERROR: failed to parse remote data\n");
-        printf("Enter remote data (single line, no wrapping):\n");
-        printf("> ");
-        fflush (stdout);
-      }
-      g_free (line);
-    } else if (s == G_IO_STATUS_AGAIN) {
-      g_usleep (100000);
-    }
-  }
+//  printf("Enter remote data (single line, no wrapping):\n");
+//  printf("> ");
+//  GIOStatus s;
+//  fflush (stdout);
+//  while (!exit_thread) {
+//    s = g_io_channel_read_line (io_stdin, &line, NULL, NULL, NULL);
+//    if (s == G_IO_STATUS_NORMAL) {
+//      // Parse remote candidate list and set it on the agent
+//      rval = parse_remote_data(agent, stream_id, 1, line);
+//      if (rval == EXIT_SUCCESS) {
+//        g_free (line);
+//        break;
+//      } else {
+//        fprintf(stderr, "ERROR: failed to parse remote data\n");
+//        printf("Enter remote data (single line, no wrapping):\n");
+//        printf("> ");
+//        fflush (stdout);
+//      }
+//      g_free (line);
+//    } else if (s == G_IO_STATUS_AGAIN) {
+//      g_usleep (100000);
+//    }
+//  }
 
   g_debug("waiting for state READY or FAILED signal...");
   g_mutex_lock(&negotiate_mutex);
@@ -234,7 +314,7 @@ example_thread(void *data)
   printf("> ");
   fflush (stdout);
   while (!exit_thread) {
-    GIOStatus s = g_io_channel_read_line (io_stdin, &line, NULL, NULL, NULL);
+    /*GIOStatus*/ s = g_io_channel_read_line (io_stdin, &line, NULL, NULL, NULL);
     if (s == G_IO_STATUS_NORMAL) {
       nice_agent_send(agent, stream_id, 1, strlen(line), line);
       g_free (line);
@@ -304,6 +384,7 @@ cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_id,
     g_main_loop_quit (gloop);
 
   printf("%.*s", len, buf);
+  printf("i am in cb_nice_recv\n");
   fflush(stdout);
 }
 
@@ -315,6 +396,7 @@ parse_candidate(char *scand, guint stream_id)
   gchar **tokens = NULL;
   guint i;
 
+  printf("begin parse candidate\n");
   tokens = g_strsplit (scand, ",", 5);
   for (i = 0; tokens[i]; i++);
   if (i != 5)
@@ -353,51 +435,51 @@ parse_candidate(char *scand, guint stream_id)
 }
 
 
-static int
-print_local_data (NiceAgent *agent, guint stream_id, guint component_id)
-{
-  int result = EXIT_FAILURE;
-  gchar *local_ufrag = NULL;
-  gchar *local_password = NULL;
-  gchar ipaddr[INET6_ADDRSTRLEN];
-  GSList *cands = NULL, *item;
-
-  if (!nice_agent_get_local_credentials(agent, stream_id,
-      &local_ufrag, &local_password))
-    goto end;
-
-  cands = nice_agent_get_local_candidates(agent, stream_id, component_id);
-  if (cands == NULL)
-    goto end;
-
-  printf("%s %s", local_ufrag, local_password);
-
-  for (item = cands; item; item = item->next) {
-    NiceCandidate *c = (NiceCandidate *)item->data;
-
-    nice_address_to_string(&c->addr, ipaddr);
-
-    // (foundation),(prio),(addr),(port),(type)
-    printf(" %s,%u,%s,%u,%s",
-        c->foundation,
-        c->priority,
-        ipaddr,
-        nice_address_get_port(&c->addr),
-        candidate_type_name[c->type]);
-  }
-  printf("\n");
-  result = EXIT_SUCCESS;
-
- end:
-  if (local_ufrag)
-    g_free(local_ufrag);
-  if (local_password)
-    g_free(local_password);
-  if (cands)
-    g_slist_free_full(cands, (GDestroyNotify)&nice_candidate_free);
-
-  return result;
-}
+//static int
+//print_local_data (NiceAgent *agent, guint stream_id, guint component_id)
+//{
+//  int result = EXIT_FAILURE;
+//  gchar *local_ufrag = NULL;
+//  gchar *local_password = NULL;
+//  gchar ipaddr[INET6_ADDRSTRLEN];
+//  GSList *cands = NULL, *item;
+//
+//  if (!nice_agent_get_local_credentials(agent, stream_id,
+//      &local_ufrag, &local_password))
+//    goto end;
+//
+//  cands = nice_agent_get_local_candidates(agent, stream_id, component_id);
+//  if (cands == NULL)
+//    goto end;
+//
+//  printf("%s %s", local_ufrag, local_password);
+//
+//  for (item = cands; item; item = item->next) {
+//    NiceCandidate *c = (NiceCandidate *)item->data;
+//
+//    nice_address_to_string(&c->addr, ipaddr);
+//
+//    // (foundation),(prio),(addr),(port),(type)
+//    printf(" %s,%u,%s,%u,%s",
+//        c->foundation,
+//        c->priority,
+//        ipaddr,
+//        nice_address_get_port(&c->addr),
+//        candidate_type_name[c->type]);
+//  }
+//  printf("\n");
+//  result = EXIT_SUCCESS;
+//
+// end:
+//  if (local_ufrag)
+//    g_free(local_ufrag);
+//  if (local_password)
+//    g_free(local_password);
+//  if (cands)
+//    g_slist_free_full(cands, (GDestroyNotify)&nice_candidate_free);
+//
+//  return result;
+//}
 
 
 static int
@@ -458,4 +540,366 @@ parse_remote_data(NiceAgent *agent, guint stream_id,
     g_slist_free_full(remote_candidates, (GDestroyNotify)&nice_candidate_free);
 
   return result;
+
+}
+//**********user_add
+static int
+communicate_signaling_passive(NiceAgent *agent, guint _stream_id,guint component_id)
+{
+    gchar *local_ufrag = NULL;  //本地用户名
+    gchar *local_password = NULL;   //本地密码
+    gchar ipaddr[INET6_ADDRSTRLEN]; //
+    GSList *cands = NULL, *item;    //
+    GSocketClient * client = NULL;
+    GError *error = NULL;
+    GOutputStream * out_stream = NULL;
+    gssize ret_int = 0;
+    char *buffer_recv = NULL;
+    char buffer_send[256];
+    gsize len =0;
+    GSocketConnection *connection = NULL;
+    GSocket *socket = NULL;
+    GIOChannel *channel = NULL;
+    gint fd = 0;
+    GIOStatus ret;
+    char *bf;
+    gsize total_len;	
+    int rval;
+    GIOFlags flags;
+
+
+
+    //获取账号密码
+    if (!nice_agent_get_local_credentials(agent, _stream_id,
+                                          &local_ufrag, &local_password))
+        goto end;
+    //获取candidates
+    cands = nice_agent_get_local_candidates(agent, _stream_id, component_id);
+    if (cands == NULL)
+        goto end;
+    //建立tcp连接
+    client = g_socket_client_new();
+    connection = g_socket_client_connect_to_host (client,signaling_addr,signaling_port,NULL,&error);
+    if (error){
+        printf("fail to connect with the signaling server, please try manual method");
+	    g_error("Error: %s\n", error->message);
+	    exit(1);
+    }else{
+        g_message("Connected with signaling ！");
+    }
+    out_stream = g_io_stream_get_output_stream(G_IO_STREAM(connection));
+
+    socket = g_socket_connection_get_socket(connection);
+    fd = g_socket_get_fd(socket);
+    channel = g_io_channel_unix_new(fd);
+     flags = g_io_channel_get_flags (channel);
+      g_io_channel_set_flags (channel, flags & ~G_IO_FLAG_NONBLOCK, NULL);
+    if(!channel)
+    {
+        goto end;
+        g_io_channel_unref(channel);
+    }
+    //发送join请求
+
+    bf = buffer_send;
+    len = sprintf(bf,"JOIN\n%s",room);
+    total_len = len;
+    //发送自身的candidate到服务器房间
+    //先是用户名密码
+    bf = bf + len;
+    len = sprintf(bf,"%s %s", local_ufrag, local_password);
+    total_len += len;
+    for (item = cands; item; item = item->next) {
+        NiceCandidate *c = (NiceCandidate *)item->data;
+        nice_address_to_string(&c->addr, ipaddr);
+        bf = bf + len;
+        len = sprintf(bf," %s,%u,%s,%u,%s",
+                      c->foundation,
+                      c->priority,
+                      ipaddr,
+                      nice_address_get_port(&c->addr),
+                      candidate_type_name[c->type]);
+        total_len = total_len + len;
+        // (foundation),(prio),(addr),(port),(type)
+    }
+    len = sprintf(bf+len,"\n");
+    total_len = total_len + len;
+    printf("send is :%s", buffer_send);
+    ret_int = g_output_stream_write(out_stream, buffer_send,total_len , NULL, NULL);
+    g_output_stream_flush(out_stream, NULL, NULL);
+
+    if((unsigned int)ret_int == total_len)
+    {
+        g_message("writen the request message and candidate");
+    }else if(ret_int < 1)
+    {
+        g_error("write error");
+    }
+    else
+        g_error("write less than request");
+
+    //等待对方的candidate
+    printf("waiting for the remote candidate.....\n");
+    if(buffer_recv)
+	   g_free(buffer_recv);
+    while(1)
+    {
+        ret = g_io_channel_read_line(channel, &buffer_recv,&len,NULL,NULL);
+        //****错误情况
+        if(ret == G_IO_STATUS_ERROR){
+            g_error ("Error reading: %s\n", error->message);
+           // g_object_unref(data);
+            continue;
+        }
+        else if (ret == G_IO_STATUS_EOF) {
+            g_print("client finished\n");
+            continue;
+        }
+            //**********
+        else{
+            if(len > 0)
+                if('\n' == buffer_recv[len - 1])
+                    buffer_recv[len - 1] = '\0';
+
+            if(!room){  // 未获得房间信息
+                printf("it is very strange?????\n");
+            }
+            else
+            {
+                printf("parse remote data begin\n");
+                rval = parse_remote_data(agent,_stream_id, 1, buffer_recv);
+            }
+            if (rval == EXIT_SUCCESS) {
+                printf("parse remote date success!!!\n");
+		    g_free (buffer_recv);
+                break;
+            } else {
+                fprintf(stderr, "ERROR: failed to parse remote data\n");
+                printf("Enter remote data (single line, no wrapping):\n");
+                //重发
+            }
+        }
+    }
+
+    end:
+    if(connection)
+       g_object_unref(connection);
+    if(channel)
+        g_io_channel_unref(channel);
+    printf("free \n");
+    if(local_ufrag)
+        g_free(local_ufrag);
+    printf("free \n");
+    if (local_password)
+        g_free(local_password);
+    printf("free \n");
+    if (cands)
+        g_slist_free_full(cands, (GDestroyNotify)&nice_candidate_free);
+    printf("free \n");
+    if(buffer_recv)
+        g_free(buffer_recv);
+    printf("free \n");
+    //if(buffer_send)
+      //  g_free(buffer_send);
+    return 1;
+}
+static int
+communicate_signaling(NiceAgent *agent, guint _stream_id,guint component_id)
+{
+
+    gchar *local_ufrag = NULL;  //本地用户名
+    gchar *local_password = NULL;   //本地密码
+    gchar ipaddr[INET6_ADDRSTRLEN]; //
+    GSList *cands = NULL, *item;    //
+    GSocketClient * client = NULL;
+    GError *error = NULL;
+    GOutputStream * out_stream = NULL;
+    gssize ret_int = 0;
+    char *buffer_recv = NULL;
+    char buffer_send[256];
+    gsize len =0;
+    GSocketConnection * connection = NULL;
+    GSocket *socket = NULL;
+    GIOChannel *channel = NULL;
+    gint fd = 0;
+    GIOStatus ret = 0;
+    char * bf;
+    gsize total_len;
+    int rval;
+    GIOFlags flags;
+
+	
+    //获取账号密码
+    if (!nice_agent_get_local_credentials(agent, _stream_id,
+                                          &local_ufrag, &local_password))
+        goto end;
+    //获取candidates
+    cands = nice_agent_get_local_candidates(agent, _stream_id, component_id);
+    if (cands == NULL)
+        goto end;
+    //建立tcp连接
+    client = g_socket_client_new();
+    connection = g_socket_client_connect_to_host (client,signaling_addr,signaling_port,NULL,&error);
+    if (error){
+	g_error("connect signaling server failed, please try the manual method");
+        g_error("Error: %s\n", error->message);
+	exit(1);
+    }else{
+        g_message("Connected with signaling ！");
+    }
+    out_stream = g_io_stream_get_output_stream(G_IO_STREAM(connection));
+
+    socket = g_socket_connection_get_socket(connection);
+    fd = g_socket_get_fd(socket);
+    channel = g_io_channel_unix_new(fd);
+    flags = g_io_channel_get_flags (channel);
+      g_io_channel_set_flags (channel, flags & ~G_IO_FLAG_NONBLOCK, NULL);
+    if(!channel)
+    {
+        goto end;
+        g_io_channel_unref(channel);
+    }
+    //请求房间
+   
+    bf = buffer_send;
+    //先是用户名密码
+    len = sprintf(bf,"REQUEST\n%s %s", local_ufrag, local_password);
+    total_len = len;
+    for (item = cands; item; item = item->next) {
+        NiceCandidate *c = (NiceCandidate *)item->data;
+
+        nice_address_to_string(&c->addr, ipaddr);
+        bf = bf + len;
+        len = sprintf(bf," %s,%u,%s,%u,%s",
+                      c->foundation,
+                      c->priority,
+                      ipaddr,
+                      nice_address_get_port(&c->addr),
+                      candidate_type_name[c->type]);
+        total_len = total_len + len;
+        // (foundation),(prio),(addr),(port),(type)
+    }
+    len = sprintf(bf+len,"\n");
+    total_len = total_len + len;
+    printf("send is :%s", buffer_send);
+    ret_int = g_output_stream_write(out_stream, buffer_send,total_len , NULL, NULL);
+    g_output_stream_flush(out_stream, NULL, NULL);
+
+    if((unsigned int)ret_int == total_len)
+    {
+        g_message("writen the request message and candidate");
+    }else if(ret_int < 1)
+    {
+        g_error("write error");
+    }
+    else
+        g_error("write less than request");
+
+    //得到房间号
+    printf("waiting for the room number.....\n");
+   if(buffer_recv)
+	   g_free(buffer_recv);
+    while(!room)
+    {
+       	 ret = g_io_channel_read_line(channel, &buffer_recv,&len,NULL,&error);
+        //****错误情况
+	printf("recv a message : %s\n",buffer_recv);
+        if(ret == G_IO_STATUS_ERROR){
+            g_error ("Error reading: %s\n", error->message);
+           // g_object_unref(data);
+            continue;
+        }
+        else if (ret == G_IO_STATUS_EOF) {
+            g_print("client finished\n");
+            continue;
+        }
+        //**********
+        else{
+            if(len > 0)
+                if('\n' == buffer_recv[len - 1])
+                    buffer_recv[len - 1] = '\0';
+
+            if(!room){  // 未获得房间信息
+                if(!strncmp(buffer_recv,"ROOM:",5)){
+                    room = buffer_recv;
+                    printf("we got a room ! %s\n",room);
+                }
+                else {
+                    g_print("recv a message but i have not get a room number\n");
+                    continue;
+                }
+            }
+        }
+    }
+    g_output_stream_flush(out_stream, NULL, NULL);
+    printf("buffer:%s",buffer_recv);
+
+    //等待对方的candidate
+   
+    printf("waiting for the remote candidate.....\n");
+    if(buffer_recv)
+    free(buffer_recv);
+    while(1)
+    {
+	buffer_recv = NULL;   
+        ret = g_io_channel_read_line(channel, &buffer_recv,&len,NULL,NULL);
+        //****错误情况
+        if(ret == G_IO_STATUS_ERROR){
+            g_error ("Error reading: %s\n", error->message);
+           // g_object_unref(data);
+            continue;
+        }
+        else if (ret == G_IO_STATUS_EOF) {
+            g_print("client finished\n");
+            continue;
+        }
+            //**********
+        else{
+            if(len > 0)
+                if('\n' == buffer_recv[len - 1])
+                    buffer_recv[len - 1] = '\0';
+
+            if(!room){  // 未获得房间信息
+                printf("it is very strange?????\n");
+            }
+            else
+            {
+                printf("parse remote data begin: %s\n",buffer_recv);
+                rval = parse_remote_data(agent,_stream_id, 1, buffer_recv);
+            }
+            if (rval == EXIT_SUCCESS) {
+                printf("parse success !!!\n");
+		    g_free (buffer_recv);
+                break;
+            } else {
+                fprintf(stderr, "ERROR: failed to parse remote data\n");
+                printf("Enter remote data (single line, no wrapping):\n");
+                
+		//重发
+            }
+        }
+    }
+
+    end:
+    if(connection)
+       g_object_unref(connection);
+    printf("free\n");
+    if(channel)
+        g_io_channel_unref(channel);
+    printf("free\n");
+    if(local_ufrag)
+        g_free(local_ufrag);
+    printf("free\n");
+    if (local_password)
+        g_free(local_password);
+    printf("free\n");
+    if (cands)
+        g_slist_free_full(cands, (GDestroyNotify)&nice_candidate_free);
+    printf("free\n");
+    if(buffer_recv)
+        g_free(buffer_recv);
+    printf("free\n");
+    //if(buffer_send)
+    //	g_free(buffer_send);
+    return 1;
 }
