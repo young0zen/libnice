@@ -334,6 +334,9 @@ end:
   g_object_unref(agent);
   g_main_loop_quit (gloop);
 
+  //if(room)
+	  //free(room);
+
   return NULL;
 }
 
@@ -555,7 +558,7 @@ communicate_signaling_passive(NiceAgent *agent, guint _stream_id,guint component
     GOutputStream * out_stream = NULL;
     gssize ret_int = 0;
     char *buffer_recv = NULL;
-    char buffer_send[256];
+    char buffer_send[1024] = {0};
     gsize len =0;
     GSocketConnection *connection = NULL;
     GSocket *socket = NULL;
@@ -592,12 +595,11 @@ communicate_signaling_passive(NiceAgent *agent, guint _stream_id,guint component
     socket = g_socket_connection_get_socket(connection);
     fd = g_socket_get_fd(socket);
     channel = g_io_channel_unix_new(fd);
-     flags = g_io_channel_get_flags (channel);
-      g_io_channel_set_flags (channel, flags & ~G_IO_FLAG_NONBLOCK, NULL);
+    flags = g_io_channel_get_flags (channel);
+    g_io_channel_set_flags (channel, flags & ~G_IO_FLAG_NONBLOCK, NULL);
     if(!channel)
     {
         goto end;
-        g_io_channel_unref(channel);
     }
     //发送join请求
 
@@ -625,6 +627,7 @@ communicate_signaling_passive(NiceAgent *agent, guint _stream_id,guint component
     len = sprintf(bf+len,"\n");
     total_len = total_len + len;
     printf("send is :%s", buffer_send);
+
     ret_int = g_output_stream_write(out_stream, buffer_send,total_len , NULL, NULL);
     g_output_stream_flush(out_stream, NULL, NULL);
 
@@ -640,8 +643,10 @@ communicate_signaling_passive(NiceAgent *agent, guint _stream_id,guint component
 
     //等待对方的candidate
     printf("waiting for the remote candidate.....\n");
-    if(buffer_recv)
+    if(buffer_recv) {
 	   g_free(buffer_recv);
+	   buffer_recv = NULL;
+    }
     while(1)
     {
         ret = g_io_channel_read_line(channel, &buffer_recv,&len,NULL,NULL);
@@ -716,7 +721,7 @@ communicate_signaling(NiceAgent *agent, guint _stream_id,guint component_id)
     GOutputStream * out_stream = NULL;
     gssize ret_int = 0;
     char *buffer_recv = NULL;
-    char buffer_send[256];
+    char buffer_send[1024] = {0};
     gsize len =0;
     GSocketConnection * connection = NULL;
     GSocket *socket = NULL;
@@ -757,7 +762,6 @@ communicate_signaling(NiceAgent *agent, guint _stream_id,guint component_id)
     if(!channel)
     {
         goto end;
-        g_io_channel_unref(channel);
     }
     //请求房间
    
@@ -797,8 +801,10 @@ communicate_signaling(NiceAgent *agent, guint _stream_id,guint component_id)
 
     //得到房间号
     printf("waiting for the room number.....\n");
-   if(buffer_recv)
-	   g_free(buffer_recv);
+    if(buffer_recv) {
+	g_free(buffer_recv);
+	buffer_recv = NULL;
+    }
     while(!room)
     {
        	 ret = g_io_channel_read_line(channel, &buffer_recv,&len,NULL,&error);
@@ -837,8 +843,10 @@ communicate_signaling(NiceAgent *agent, guint _stream_id,guint component_id)
     //等待对方的candidate
    
     printf("waiting for the remote candidate.....\n");
-    if(buffer_recv)
-    free(buffer_recv);
+    if(buffer_recv) {
+	    g_free(buffer_recv);
+	    buffer_recv = NULL;
+    }
     while(1)
     {
 	buffer_recv = NULL;   
