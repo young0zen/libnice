@@ -217,10 +217,7 @@ example_thread(void *data)
 
   //user_add*******
   CURL *curl;
-<<<<<<< HEAD
   GSList *item = NULL;
-=======
->>>>>>> 6cad9f1ec549853470e0886da875b87797468409
   NiceCandidate *c = NULL;
   CURLcode err; 
   struct Signal_Struct peer_candidate;
@@ -372,11 +369,7 @@ example_thread(void *data)
 	total_len = len;
     	puts("fuck4");
 	//然后candidate
-<<<<<<< HEAD
 	for ( item = cands; item; item = item->next) {
-=======
-	for (GSList *item = cands; item; item = item->next) {
->>>>>>> 6cad9f1ec549853470e0886da875b87797468409
 		c = (NiceCandidate *)item->data;
        		nice_address_to_string(&c->addr, ipaddr);
         	bf = bf + len;
@@ -434,7 +427,6 @@ jump_retry:
 					sprintf(url,"http://%s:%d",signaling_addr,signaling_port);
 					curl_easy_setopt(curl,CURLOPT_URL,url);
 					break;
-<<<<<<< HEAD
 				case 6: 
 					printf("sorry, you enter a wrong ip addr, enter the signaling address\n");
 					printf(">\n");
@@ -453,24 +445,13 @@ jump_retry:
 					//跳到结束处
 					curl_easy_cleanup(curl);	
 					goto end;
-=======
-				default:
-					printf("sorry, we meet a fault that we cannot fixed, please close");
-					//跳到结束处
->>>>>>> 6cad9f1ec549853470e0886da875b87797468409
 					break;
 			}
 		}
 		else
 			break;
 	}
-<<<<<<< HEAD
 
-=======
-	printf("***********done*******\n");
-
-	curl_easy_cleanup(curl);	
->>>>>>> 6cad9f1ec549853470e0886da875b87797468409
 	printf("we recieved the signal message: %s\n", peer_candidate.memory);
 	if(strncmp(peer_candidate.memory,"fail",4) == 0 )
 	{
@@ -478,14 +459,11 @@ jump_retry:
 		printf("fail to join/create a room ");
 		goto jump_retry;
 	}
-<<<<<<< HEAD
 	else if(strncmp(peer_candidate.memory,"timeout",7) == 0 )
 	{
 		printf("waiting for too long ");
 		goto jump_retry;
 	}
-=======
->>>>>>> 6cad9f1ec549853470e0886da875b87797468409
 	//字符转换处理
 	strrpl(peer_candidate.memory,".0x2B","+");
         strrpl(peer_candidate.memory,".0x25","%");
@@ -494,7 +472,6 @@ jump_retry:
 		 rval = parse_remote_data(agent,stream_id, 1,peer_candidate.memory);
 		if(rval != EXIT_SUCCESS){ //解析失败
 		g_error("something wrong when parse the candidate");
-<<<<<<< HEAD
 		
 		//重试
 		}
@@ -505,15 +482,7 @@ jump_retry:
 	curl_easy_cleanup(curl);	
 	printf("***********done*******\n");
  
-=======
-		//重试
-		}
-  }
-  else{
-	g_error("failed to create curl");
-  }
->>>>>>> 6cad9f1ec549853470e0886da875b87797468409
-  // Listen on stdin for the remote candidate list
+// Listen on stdin for the remote candidate list
 //  printf("Enter remote data (single line, no wrapping):\n");
 //  printf("> ");
 //  GIOStatus s;
