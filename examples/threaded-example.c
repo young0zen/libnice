@@ -384,7 +384,9 @@ example_thread(void *data)
     }
 	//把room最后换成\0
 	room[4] = '\0';
-	sprintf(post_data,"room=%s&name=%s&candidate=%s",room,local_ufrag,candi);
+	sprintf(post_data,
+            "{\"room\":\"%s\", \"name\":\"%s\", \"candidate\"=\"%s\"}",
+            room,local_ufrag,candi);
 	//打包完毕，清理一下
 	if(local_ufrag)
 		free(local_ufrag);
@@ -396,11 +398,11 @@ example_thread(void *data)
 	printf("%s\n",post_data);
 	//清理 over
 	//因为post中不能含有+ % /字符 所以处理一下
-	strrpl(post_data,"+",".0x2B");
-	strrpl(post_data,"%",".0x25");
-	strrpl(post_data,"/",".0x2F");
+	//strrpl(post_data,"+",".0x2B");
+	//strrpl(post_data,"%",".0x25");
+	//strrpl(post_data,"/",".0x2F");
 	//在打印看一下
-	printf("转换后：%s\n",post_data);
+	//printf("转换后：%s\n",post_data);
 	err = curl_easy_setopt(curl,CURLOPT_POSTFIELDS, post_data);
 	if(err != CURLE_OK){
 		g_error("there is something wrong when set the postdata");
@@ -465,9 +467,9 @@ jump_retry:
 		goto jump_retry;
 	}
 	//字符转换处理
-	strrpl(peer_candidate.memory,".0x2B","+");
-        strrpl(peer_candidate.memory,".0x25","%");
-        strrpl(peer_candidate.memory,".0x2F","/");	
+	//strrpl(peer_candidate.memory,".0x2B","+");
+        //strrpl(peer_candidate.memory,".0x25","%");
+        //strrpl(peer_candidate.memory,".0x2F","/");	
 	printf("parse remote data begin! !\n");
 		 rval = parse_remote_data(agent,stream_id, 1,peer_candidate.memory);
 		if(rval != EXIT_SUCCESS){ //解析失败
