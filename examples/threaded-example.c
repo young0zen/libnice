@@ -234,6 +234,7 @@ example_thread(void *data)
   gint total_len = 0;
   int rval = 0;
   char* room = NULL;
+  int error = 0;
 //user_add*******
   GIOFlags flags;	  
   //int rval;
@@ -245,6 +246,7 @@ example_thread(void *data)
 #endif
   g_io_channel_set_flags (io_stdin, G_IO_FLAG_NONBLOCK, NULL);
 
+  error = error;
   g_networking_init();
   flags = g_io_channel_get_flags(io_stdin);
   g_io_channel_set_flags(io_stdin, flags&~G_IO_FLAG_NONBLOCK,NULL);
@@ -385,7 +387,7 @@ example_thread(void *data)
 	//把room最后换成\0
 	room[4] = '\0';
 	sprintf(post_data,
-            "{\"room\":\"%s\", \"name\":\"%s\", \"candidate\"=\"%s\"}",
+            "{\"room\":\"%s\", \"name\":\"%s\", \"candidate\":\"%s\"}",
             room,local_ufrag,candi);
 	//打包完毕，清理一下
 	if(local_ufrag)
@@ -421,10 +423,10 @@ example_thread(void *data)
 jump_retry:
 					printf("sorry, please try another one or try again, enter the signaling address\n");
 					printf(">\n");
-					scanf("%s", signaling_addr);
+					error = scanf("%s", signaling_addr);
 					printf("and the port\n");
 					printf(">\n");
-					scanf("%d", &signaling_port);
+					error = scanf("%d", &signaling_port);
   					//重设url
 					sprintf(url,"http://%s:%d",signaling_addr,signaling_port);
 					curl_easy_setopt(curl,CURLOPT_URL,url);
@@ -432,10 +434,10 @@ jump_retry:
 				case 6: 
 					printf("sorry, you enter a wrong ip addr, enter the signaling address\n");
 					printf(">\n");
-					scanf("%s", signaling_addr);
+					error = scanf("%s", signaling_addr);
 					printf("and the port\n");
 					printf(">\n");
-					scanf("%d", &signaling_port);
+					error = scanf("%d", &signaling_port);
   					//重设url
 					sprintf(url,"http://%s:%d",signaling_addr,signaling_port);
 					curl_easy_setopt(curl,CURLOPT_URL,url);
@@ -443,7 +445,7 @@ jump_retry:
 
 
 				default:
-					printf("sorry, we meet a fault that we cannot fixed, please close");
+					printf("sorry, we meet a fault that we cannot fixed, please close\n");
 					//跳到结束处
 					curl_easy_cleanup(curl);	
 					goto end;
