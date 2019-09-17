@@ -482,7 +482,6 @@ test_thread(NiceAgent *agent, guint stream_id)
 {
     char buff[1024] = {0};
     int num = 0;
-    ack_recvd = FALSE;
     //int test_fd = (int)(long)data;
     // write to test_fd[1] so that main thread can see
     while (1) { /* forever */
@@ -497,6 +496,7 @@ test_thread(NiceAgent *agent, guint stream_id)
         if (num >= TEST_MAX_NUM) {
             num = 0;
             g_mutex_lock(&ack_mutex);
+            ack_recvd = FALSE;
             while (!ack_recvd) {
                 g_mutex_unlock(&ack_mutex);
                 if (nice_agent_send(agent, stream_id, 1, strlen("end\n"), "end\n") < 0) {
@@ -508,7 +508,6 @@ test_thread(NiceAgent *agent, guint stream_id)
             }
             g_mutex_unlock(&ack_mutex);
         }
-        ack_recvd = FALSE;
     }
     //close(test_fd);
     return NULL;
