@@ -46,6 +46,7 @@
 #include <gio/gnetworking.h>
 #include <curl/curl.h>
 
+#define IS_TEST 1
 struct Signal_Struct
 { //用来存信令服务器发挥的response
     char *memory;
@@ -108,6 +109,7 @@ static void cb_component_state_changed(NiceAgent *agent, guint stream_id,
 static void cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_id,
                          guint len, gchar *buf, gpointer data);
 static void *example_thread(void *data);
+static void *test_thread(NiceAgent *, guint);
 
 //*************user_add*************
 /*static int
@@ -212,7 +214,7 @@ example_thread(void *data)
     flags = g_io_channel_get_flags(io_stdin);
     g_io_channel_set_flags(io_stdin, flags & ~G_IO_FLAG_NONBLOCK, NULL);
     // Create the nice agent
-    agent = nice_agent_new_reliable(g_main_loop_get_context(gloop),
+    agent = nice_agent_new(g_main_loop_get_context(gloop),
                                     NICE_COMPATIBILITY_RFC5245);
     if (agent == NULL)
         g_error("Failed to create agent");
@@ -439,29 +441,38 @@ example_thread(void *data)
         printf(" [%s]:%d)\n", ipaddr, nice_address_get_port(&remote->addr));
     }
 
-    /* Listen to stdin and send data written to it */
-    printf("\nSend lines to remote (Ctrl-D to quit):\n");
-    printf("> ");
-    fflush(stdout);
-    while (!exit_thread)
-    {
-        /*GIOStatus*/ s = g_io_channel_read_line(io_stdin, &line, NULL, NULL, NULL);
-        if (s == G_IO_STATUS_NORMAL)
+    if (IS_TEST && controlling) {
+        // if ((test_fd = dup(fileno(stdin))) < 0) {
+        //     perror("dup");
+        //     return NULL;
+        // }
+        //fclose(stdin);
+        test_thread(agent, stream_id);
+    } else {
+        /* Listen to stdin and send data written to it */
+        printf("\nSend lines to remote (Ctrl-D to quit):\n");
+        printf("> ");
+        fflush(stdout);
+        while (!exit_thread)
         {
-            nice_agent_send(agent, stream_id, 1, strlen(line), line);
-            g_free(line);
-            printf("> ");
-            fflush(stdout);
-        }
-        else if (s == G_IO_STATUS_AGAIN)
-        {
-            g_usleep(100000);
-        }
-        else
-        {
-            /* Ctrl-D was pressed. */
-            nice_agent_send(agent, stream_id, 1, 1, "\0");
-            break;
+            /*GIOStatus*/ s = g_io_channel_read_line(io_stdin, &line, NULL, NULL, NULL);
+            if (s == G_IO_STATUS_NORMAL)
+            {
+                nice_agent_send(agent, stream_id, 1, strlen(line), line);
+                g_free(line);
+                printf("> ");
+                fflush(stdout);
+            }
+            else if (s == G_IO_STATUS_AGAIN)
+            {
+                g_usleep(100000);
+            }
+            else
+            {
+                /* Ctrl-D was pressed. */
+                nice_agent_send(agent, stream_id, 1, 1, "\0");
+                break;
+            }
         }
     }
 
@@ -469,6 +480,29 @@ end:
     g_io_channel_unref(io_stdin);
     g_object_unref(agent);
     g_main_loop_quit(gloop);
+    return NULL;
+}
+
+static void *
+test_thread(NiceAgent *agent, guint stream_id)
+{
+    char buff[1024] = {0};
+    int num = 0;
+    //int test_fd = (int)(long)data;
+    // write to test_fd[1] so that main thread can see
+    while (1) { /* forever */
+        bzero(buff, sizeof(buff));
+        sprintf(buff, "%d\n", ++num);
+        /* get statistic info here */
+        if (num >= 1e5) {
+            num = 0;
+        }
+        if (nice_agent_send(agent, stream_id, 1, strlen(buff), buff) < 0) {
+            perror("test send");
+            exit(-1);
+        }
+    }
+    //close(test_fd);
     return NULL;
 }
 
@@ -517,11 +551,43 @@ static void
 cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_id,
              guint len, gchar *buf, gpointer data)
 {
-    if (len == 1 && buf[0] == '\0')
-        g_main_loop_quit(gloop);
+    char num_buff[256] = {0};
+    static int recv_count = 0;
+    int lineno = 0;
+    char *nxt;
 
-    printf("%.*s", len, buf);
-    fflush(stdout);
+    if (len == 1 && buf[0] == '\0') {
+        printf("%d, %s", len, buf);
+        g_main_loop_quit(gloop);
+    }
+
+    buf[len] = '\0';
+    if (IS_TEST && !controlling) {
+        while (buf != NULL && *buf != '\0') {
+            /* get a line */
+            bzero(num_buff, sizeof(num_buff));
+            nxt = buf;
+            while (*nxt != '\n' && *nxt) {
+                nxt++;
+            }
+            strncpy(num_buff, buf, nxt - buf);
+
+            //printf("%s\n", buf);
+            lineno = atoi(num_buff);
+            //printf("%d\n", lineno);
+            recv_count++;
+            if (lineno >= 1e5) {
+                printf("pakcket loss: %f\n", 1 - 1.0 * recv_count / lineno);
+                recv_count = lineno - 1e5;
+                fflush(stdout);
+            }
+
+            buf = *nxt == 0 ? 0 : nxt + 1;
+        }
+    } else {
+        printf("%s", buf);
+        fflush(stdout);
+    }
 }
 
 static NiceCandidate *
@@ -532,7 +598,6 @@ parse_candidate(char *scand, guint stream_id)
     gchar **tokens = NULL;
     guint i;
 
-    printf("begin parse candidate\n");
     tokens = g_strsplit(scand, ",", 5);
     for (i = 0; tokens[i]; i++)
         ;
