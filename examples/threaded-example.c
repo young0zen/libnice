@@ -43,15 +43,50 @@
 #include <ctype.h>
 
 #include <agent.h>
+#include <semaphore.h>
 #include <gio/gnetworking.h>
 #include <curl/curl.h>
 
 #define IS_TEST 1
+#define TEST_MAX_NUM 1e4
 struct Signal_Struct
 { //用来存信令服务器发挥的response
     char *memory;
     size_t size;
 };
+
+gchar *signaling_addr = NULL;
+guint signaling_port = 0;
+
+static GMainLoop *gloop;
+static gchar *stun_addr = NULL;
+static guint stun_port;
+static gboolean controlling;
+static gboolean exit_thread, candidate_gathering_done, negotiation_done, ack_recvd;
+static GMutex gather_mutex, negotiate_mutex, ack_mutex;
+static GCond gather_cond, negotiate_cond;
+
+static const gchar *candidate_type_name[] = {"host", "srflx", "prflx", "relay"};
+
+static const gchar *state_name[] = {"disconnected", "gathering", "connecting",
+                                    "connected", "ready", "failed"};
+
+//static int print_local_data(NiceAgent *agent, guint stream_id,
+//    guint component_id);
+static int parse_remote_data(NiceAgent *agent, guint stream_id,
+                             guint component_id, char *line);
+static void cb_candidate_gathering_done(NiceAgent *agent, guint stream_id,
+                                        gpointer data);
+static void cb_new_selected_pair(NiceAgent *agent, guint stream_id,
+                                 guint component_id, gchar *lfoundation,
+                                 gchar *rfoundation, gpointer data);
+static void cb_component_state_changed(NiceAgent *agent, guint stream_id,
+                                       guint component_id, guint state,
+                                       gpointer data);
+static void cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_id,
+                         guint len, gchar *buf, gpointer data);
+static void *example_thread(void *data);
+static void *test_thread(NiceAgent *, guint);
 
 //读response函数
 static size_t
@@ -77,47 +112,6 @@ WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
 
     return realsize;
 }
-
-gchar *signaling_addr = NULL;
-guint signaling_port = 0;
-
-static GMainLoop *gloop;
-static gchar *stun_addr = NULL;
-static guint stun_port;
-static gboolean controlling;
-static gboolean exit_thread, candidate_gathering_done, negotiation_done;
-static GMutex gather_mutex, negotiate_mutex;
-static GCond gather_cond, negotiate_cond;
-
-static const gchar *candidate_type_name[] = {"host", "srflx", "prflx", "relay"};
-
-static const gchar *state_name[] = {"disconnected", "gathering", "connecting",
-                                    "connected", "ready", "failed"};
-
-//static int print_local_data(NiceAgent *agent, guint stream_id,
-//    guint component_id);
-static int parse_remote_data(NiceAgent *agent, guint stream_id,
-                             guint component_id, char *line);
-static void cb_candidate_gathering_done(NiceAgent *agent, guint stream_id,
-                                        gpointer data);
-static void cb_new_selected_pair(NiceAgent *agent, guint stream_id,
-                                 guint component_id, gchar *lfoundation,
-                                 gchar *rfoundation, gpointer data);
-static void cb_component_state_changed(NiceAgent *agent, guint stream_id,
-                                       guint component_id, guint state,
-                                       gpointer data);
-static void cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_id,
-                         guint len, gchar *buf, gpointer data);
-static void *example_thread(void *data);
-static void *test_thread(NiceAgent *, guint);
-
-//*************user_add*************
-/*static int
-communicate_signaling(NiceAgent *agent, guint _stream_id,guint component_id);
-static int
-communicate_signaling_passive(NiceAgent *agent, guint _stream_id,guint component_id);
-*/
-//**********************************
 
 int main(int argc, char *argv[])
 {
@@ -488,19 +482,34 @@ test_thread(NiceAgent *agent, guint stream_id)
 {
     char buff[1024] = {0};
     int num = 0;
+    ack_recvd = FALSE;
     //int test_fd = (int)(long)data;
     // write to test_fd[1] so that main thread can see
     while (1) { /* forever */
         bzero(buff, sizeof(buff));
         sprintf(buff, "%d\n", ++num);
         /* get statistic info here */
-        if (num >= 1e5) {
+        if (num >= TEST_MAX_NUM) {
             num = 0;
         }
         if (nice_agent_send(agent, stream_id, 1, strlen(buff), buff) < 0) {
             perror("test send");
             exit(-1);
         }
+        if (num == 0) {
+            g_mutex_lock(&ack_mutex);
+            while (!ack_recvd) {
+                g_mutex_unlock(&ack_mutex);
+                if(nice_agent_send(agent, stream_id, 1, strlen("end"), "end") <= 0) {
+                    perror("test end");
+                    exit(-1);
+                }
+                usleep(10000);
+                g_mutex_lock(&ack_mutex);
+            }
+            g_mutex_unlock(&ack_mutex);
+        }
+        ack_recvd = FALSE;
     }
     //close(test_fd);
     return NULL;
@@ -551,9 +560,7 @@ static void
 cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_id,
              guint len, gchar *buf, gpointer data)
 {
-    char num_buff[256] = {0};
     static int recv_count = 0;
-    int lineno = 0;
     char *nxt;
 
     if (len == 1 && buf[0] == '\0') {
@@ -563,26 +570,32 @@ cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_id,
 
     buf[len] = '\0';
     if (IS_TEST && !controlling) {
+        if (len >= 3 && strncmp("end", buf, 3) == 0) {
+            if (nice_agent_send(agent, stream_id, 1, strlen("ack"), "ack") < 0) {
+                ;/* give up */
+            }
+            if (recv_count != 0)
+                printf("pakcket loss: %f\n", 1 - 1.0 * recv_count / TEST_MAX_NUM);
+            recv_count = 0;
+            return;
+        }
         while (buf != NULL && *buf != '\0') {
             /* get a line */
-            bzero(num_buff, sizeof(num_buff));
             nxt = buf;
             while (*nxt != '\n' && *nxt) {
                 nxt++;
             }
-            strncpy(num_buff, buf, nxt - buf);
-
-            //printf("%s\n", buf);
-            lineno = atoi(num_buff);
-            //printf("%d\n", lineno);
             recv_count++;
-            if (lineno >= 1e5) {
-                printf("pakcket loss: %f\n", 1 - 1.0 * recv_count / lineno);
-                recv_count = lineno - 1e5;
-                fflush(stdout);
-            }
 
             buf = *nxt == 0 ? 0 : nxt + 1;
+        }
+    } else if (IS_TEST && controlling) {
+        if (len <= 1)
+            return;
+        if (strncmp(buf, "ack", 3) == 0) {
+            g_mutex_lock(&gather_mutex);
+            ack_recvd = TRUE;
+            g_mutex_unlock(&gather_mutex);
         }
     } else {
         printf("%s", buf);
