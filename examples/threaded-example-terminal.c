@@ -249,12 +249,13 @@ example_thread(void *data)
     char *room = NULL;
 
     int pid;
-    int master_fd;
-    int slave_fd;
+    int master_fd = -1;
+    int slave_fd = -1;
+    char log_buf[1] = "\0";
     char *slave_path;
-    const char *const argv = "login";
+    const char *argv[] = {"/sbin/sh",NULL};
     //int set_up;
-    GIOChannel *mchannel;
+    GIOChannel *mchannel = NULL;
     int error = 0;
     //user_add*******
     GIOFlags flags;
@@ -272,7 +273,7 @@ example_thread(void *data)
     flags = g_io_channel_get_flags(io_stdin);
     g_io_channel_set_flags(io_stdin, flags & ~G_IO_FLAG_NONBLOCK, NULL);
     // Create the nice agent
-    agent = nice_agent_new_reliable(g_main_loop_get_context(gloop),
+    agent = nice_agent_new(g_main_loop_get_context(gloop),
                                     NICE_COMPATIBILITY_RFC5245);
     if (agent == NULL)
         g_error("Failed to create agent");
@@ -647,16 +648,17 @@ example_thread(void *data)
             g_error("dup2 error to stdout");
         if (dup2(slave_fd, STDERR_FILENO) != STDERR_FILENO)
             g_error("dup2 error to stderr");
-        if (execvp("login", (char *const *)&argv) < 0)
+        if (execvp("/sbin/sh", (char *const *)&argv) < 0)
             g_error("can't execute:");
     }
     while (!exit_thread)
     {
-        /*GIOStatus*/ s = g_io_channel_read_line(mchannel, &line, NULL, NULL, NULL);
-        if (s == G_IO_STATUS_NORMAL)
+        s = g_io_channel_read_chars(mchannel,log_buf,1,NULL,NULL);
+	if (s == G_IO_STATUS_NORMAL)
         {
-            nice_agent_send(agent, stream_id, 1, strlen(line), line);
-            g_free(line);
+            nice_agent_send(agent, stream_id, 1, 1,log_buf);
+	    printf("%s",log_buf);
+	    g_usleep(100000); 
             //printf("> ");
             //fflush (stdout);
         }
@@ -675,8 +677,12 @@ end:
     g_io_channel_unref(io_stdin);
     g_object_unref(agent);
     g_main_loop_quit(gloop);
+    if(mchannel)
     g_io_channel_unref(mchannel);
+    if(master_fd>0)
     close(master_fd);
+    if(slave_fd>0)
+    close(slave_fd);
     //if(room)
     //free(room);
 
