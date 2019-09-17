@@ -208,7 +208,7 @@ example_thread(void *data)
     flags = g_io_channel_get_flags(io_stdin);
     g_io_channel_set_flags(io_stdin, flags & ~G_IO_FLAG_NONBLOCK, NULL);
     // Create the nice agent
-    agent = nice_agent_new_reliable(g_main_loop_get_context(gloop),
+    agent = nice_agent_new(g_main_loop_get_context(gloop),
                                     NICE_COMPATIBILITY_RFC5245);
     if (agent == NULL)
         g_error("Failed to create agent");
@@ -560,8 +560,8 @@ cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_id,
              guint len, gchar *buf, gpointer data)
 {
     static int recv_count = 0;
+    static gboolean ended = FALSE;
     char *nxt;
-    gboolean ended = FALSE;
 
     if (len == 1 && buf[0] == '\0') {
         printf("%d, %s", len, buf);
