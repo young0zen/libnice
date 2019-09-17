@@ -48,7 +48,7 @@
 #include <curl/curl.h>
 
 #define IS_TEST 1
-#define TEST_MAX_NUM 1e4
+#define TEST_MAX_NUM 1e3
 struct Signal_Struct
 { //用来存信令服务器发挥的response
     char *memory;
@@ -208,7 +208,7 @@ example_thread(void *data)
     flags = g_io_channel_get_flags(io_stdin);
     g_io_channel_set_flags(io_stdin, flags & ~G_IO_FLAG_NONBLOCK, NULL);
     // Create the nice agent
-    agent = nice_agent_new(g_main_loop_get_context(gloop),
+    agent = nice_agent_new_reliable(g_main_loop_get_context(gloop),
                                     NICE_COMPATIBILITY_RFC5245);
     if (agent == NULL)
         g_error("Failed to create agent");
@@ -488,23 +488,22 @@ test_thread(NiceAgent *agent, guint stream_id)
     while (1) { /* forever */
         bzero(buff, sizeof(buff));
         sprintf(buff, "%d\n", ++num);
-        /* get statistic info here */
-        if (num >= TEST_MAX_NUM) {
-            num = 0;
-        }
+        /* TODO: get statistic info here */
+        usleep(100);
         if (nice_agent_send(agent, stream_id, 1, strlen(buff), buff) < 0) {
             perror("test send");
             exit(-1);
         }
-        if (num == 0) {
+        if (num >= TEST_MAX_NUM) {
+            num = 0;
             g_mutex_lock(&ack_mutex);
             while (!ack_recvd) {
                 g_mutex_unlock(&ack_mutex);
-                if(nice_agent_send(agent, stream_id, 1, strlen("end"), "end") <= 0) {
+                if (nice_agent_send(agent, stream_id, 1, strlen("end\n"), "end\n") < 0) {
                     perror("test end");
                     exit(-1);
                 }
-                usleep(10000);
+                usleep(100000);
                 g_mutex_lock(&ack_mutex);
             }
             g_mutex_unlock(&ack_mutex);
@@ -562,6 +561,7 @@ cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_id,
 {
     static int recv_count = 0;
     char *nxt;
+    gboolean ended = FALSE;
 
     if (len == 1 && buf[0] == '\0') {
         printf("%d, %s", len, buf);
@@ -570,24 +570,28 @@ cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_id,
 
     buf[len] = '\0';
     if (IS_TEST && !controlling) {
-        if (len >= 3 && strncmp("end", buf, 3) == 0) {
-            if (nice_agent_send(agent, stream_id, 1, strlen("ack"), "ack") < 0) {
-                ;/* give up */
-            }
-            if (recv_count != 0)
-                printf("pakcket loss: %f\n", 1 - 1.0 * recv_count / TEST_MAX_NUM);
-            recv_count = 0;
-            return;
-        }
         while (buf != NULL && *buf != '\0') {
             /* get a line */
             nxt = buf;
             while (*nxt != '\n' && *nxt) {
                 nxt++;
             }
-            recv_count++;
 
-            buf = *nxt == 0 ? 0 : nxt + 1;
+            if (strncmp("end", buf, 3) == 0) {
+                if (nice_agent_send(agent, stream_id, 1, strlen("ack\n"), "ack\n") < 0) {
+                    ;/* give up */
+                }
+                if (!ended) {
+                    printf("received: %d, pakcket loss: %f\n", recv_count, 1 - 1.0 * recv_count / TEST_MAX_NUM);
+                    ended = TRUE;
+                }
+                recv_count = 0;
+            } else { /* number */
+                recv_count++;
+                ended = FALSE;
+            }
+
+            buf = *nxt == '\0' ? '\0' : nxt + 1;
         }
     } else if (IS_TEST && controlling) {
         if (len <= 1)
