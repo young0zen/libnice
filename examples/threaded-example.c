@@ -233,6 +233,7 @@ example_thread(void *data)
     stream_id = nice_agent_add_stream(agent, 1);
 
     nice_agent_set_relay_info(agent, stream_id, 1, stun_addr, 3478, "username", "password", NICE_RELAY_TYPE_TURN_UDP);
+    //nice_agent_set_relay_info(agent, stream_id, 1, stun_addr, 3478, "username", "password", NICE_RELAY_TYPE_TURN_TCP);
     if (stream_id == 0)
         g_error("Failed to add stream");
 
@@ -578,13 +579,14 @@ cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_id,
 
             if (strncmp("end", buf, 3) == 0) {
                 if (nice_agent_send(agent, stream_id, 1, strlen("ack\n"), "ack\n") < 0) {
-                    ;/* give up */
+                    printf("warning: send ack failed.\n");/* give up */
+                } else {
+                    if (!ended) {
+                        printf("received: %d, pakcket loss: %f\n", recv_count, 1 - 1.0 * recv_count / TEST_MAX_NUM);
+                        ended = TRUE;
+                    }
+                    recv_count = 0;
                 }
-                if (!ended) {
-                    printf("received: %d, pakcket loss: %f\n", recv_count, 1 - 1.0 * recv_count / TEST_MAX_NUM);
-                    ended = TRUE;
-                }
-                recv_count = 0;
             } else { /* number */
                 recv_count++;
                 ended = FALSE;
