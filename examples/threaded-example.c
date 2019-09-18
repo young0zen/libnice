@@ -598,9 +598,9 @@ cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_id,
         if (len <= 1)
             return;
         if (strncmp(buf, "ack", 3) == 0) {
-            g_mutex_lock(&gather_mutex);
+            g_mutex_lock(&ack_mutex);
             ack_recvd = TRUE;
-            g_mutex_unlock(&gather_mutex);
+            g_mutex_unlock(&ack_mutex);
         }
     } else {
         printf("%s", buf);
