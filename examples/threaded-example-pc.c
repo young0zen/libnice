@@ -136,7 +136,6 @@ main(int argc, char *argv[])
 {
   GThread *gexamplethread;
 
-  nice_debug_enable(1);
 //******user_add
 
     if (argc > 6 || argc < 5 || argv[1][1] != '\0') {
@@ -254,7 +253,7 @@ example_thread(void *data)
   flags = g_io_channel_get_flags(io_stdin);
   g_io_channel_set_flags(io_stdin, flags&~G_IO_FLAG_NONBLOCK,NULL);
   // Create the nice agent
-  agent = nice_agent_new(g_main_loop_get_context (gloop),
+  agent = nice_agent_new_reliable(g_main_loop_get_context (gloop),
       NICE_COMPATIBILITY_RFC5245);
   if (agent == NULL)
     g_error("Failed to create agent");
@@ -553,7 +552,9 @@ jump_retry:
             
 	    if(buf_command[0]  == EOF)
 	   	{
+		puts("exit!!");
 		nice_agent_send(agent, stream_id, 1, 1, "\0");
+                g_main_loop_quit (gloop);
 		break;
 		}
 	    else
